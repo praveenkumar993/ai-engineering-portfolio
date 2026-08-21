@@ -3,7 +3,9 @@ Entry point.
 
 Step 1: config + logging spine.
 Step 2: load local documents and chunk them.
-Step 3: embed chunks and store them in Qdrant, then run a test search.
+Step 3: embed chunks and store them in Qdrant.
+Step 4: retrieve relevant chunks for a question and generate a grounded
+        answer with an LLM -- this completes the first working RAG loop.
 """
 
 from app.config import settings
@@ -12,6 +14,8 @@ from app.ingestion.local_loader import LocalLoader
 from app.ingestion.chunker import chunk_documents
 from app.embeddings.local_embedder import LocalEmbedder
 from app.vectorstore.qdrant_store import QdrantStore
+from app.generation.groq_llm import GroqLLM
+from app.generation.prompt import build_rag_prompt
 
 configure_logging()
 log = get_logger(__name__)
@@ -43,14 +47,17 @@ def main() -> None:
     )
     store.add_chunks(chunks, vectors)
 
-    test_query = "What are the stages of a RAG pipeline?"
-    query_vector = embedder.embed([test_query])[0]
-    results = store.search(query_vector, top_k=2)
+    question = "What are the stages of a RAG pipeline?"
+    query_vector = embedder.embed([question])[0]
+    retrieved_chunks = store.search(query_vector, top_k=3)
 
-    print(f"\nQuery: {test_query}")
-    for i, r in enumerate(results):
-        print(f"\n--- Result {i+1} (from {r.source_path}) ---")
-        print(r.text[:200])
+    prompt = build_rag_prompt(question, retrieved_chunks)
+    llm = GroqLLM()
+    answer = llm.generate(prompt)
+
+    print(f"\nQuestion: {question}")
+    print(f"\nAnswer:\n{answer}")
+    print(f"\n(Grounded in {len(retrieved_chunks)} retrieved chunks)")
 
     log.info("app_ready")
 

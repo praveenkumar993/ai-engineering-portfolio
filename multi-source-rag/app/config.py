@@ -22,6 +22,9 @@ class Settings(BaseSettings):
 
     # --- Logging ---
     log_level: str = "INFO"
+     # --- LLM provider ---
+    groq_api_key: str = ""
+    groq_model: str = "openai/gpt-oss-120b"
 
     # We will add embedding/LLM/vector-db settings here in later steps,
     # ONLY when the code that needs them is being written. Not before.
