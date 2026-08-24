@@ -4,13 +4,15 @@ Entry point.
 Step 1: config + logging spine.
 Step 2: load local documents and chunk them.
 Step 3: embed chunks and store them in Qdrant.
-Step 4: retrieve relevant chunks for a question and generate a grounded
-        answer with an LLM -- this completes the first working RAG loop.
+Step 4: retrieve relevant chunks and generate a grounded answer.
+Step 5: add Azure Blob Storage as a second source, merged with local --
+        this is the multi-source part of "multi-source RAG."
 """
 
 from app.config import settings
 from app.logger import configure_logging, get_logger
 from app.ingestion.local_loader import LocalLoader
+from app.ingestion.azure_blob_loader import AzureBlobLoader
 from app.ingestion.chunker import chunk_documents
 from app.embeddings.local_embedder import LocalEmbedder
 from app.vectorstore.qdrant_store import QdrantStore
@@ -29,15 +31,32 @@ def main() -> None:
         log_level=settings.log_level,
     )
 
-    loader = LocalLoader(folder_path="docs")
-    documents = loader.load()
-    chunks = chunk_documents(documents, chunk_size=500, chunk_overlap=80)
-    log.info("pipeline_summary", documents=len(documents), chunks=len(chunks))
+    # --- Step 2 + Step 5: multi-source ingestion ---
+    # Every loader implements the same BaseLoader contract, so we just
+    # call .load() on each and merge the results into one list.
+    all_documents = []
+
+    local_loader = LocalLoader(folder_path="docs")
+    all_documents.extend(local_loader.load())
+
+    if (settings.azure_storage_connection_string.strip() and settings.azure_container_name.strip() 
+        and "your_connection_string" not in settings.azure_storage_connection_string):
+        azure_loader = AzureBlobLoader(
+            connection_string=settings.azure_storage_connection_string,
+            container_name=settings.azure_container_name,
+        )
+        all_documents.extend(azure_loader.load())
+    else:
+        log.warning("azure_source_skipped_not_configured")
+
+    chunks = chunk_documents(all_documents, chunk_size=500, chunk_overlap=80)
+    log.info("pipeline_summary", documents=len(all_documents), chunks=len(chunks))
 
     if not chunks:
         log.warning("no_chunks_to_embed_stopping")
         return
 
+    # --- Step 3: embed + store ---
     embedder = LocalEmbedder()
     vectors = embedder.embed([c.text for c in chunks])
 
@@ -47,6 +66,7 @@ def main() -> None:
     )
     store.add_chunks(chunks, vectors)
 
+    # --- Step 4: retrieve + generate ---
     question = "What are the stages of a RAG pipeline?"
     query_vector = embedder.embed([question])[0]
     retrieved_chunks = store.search(query_vector, top_k=3)
@@ -58,6 +78,8 @@ def main() -> None:
     print(f"\nQuestion: {question}")
     print(f"\nAnswer:\n{answer}")
     print(f"\n(Grounded in {len(retrieved_chunks)} retrieved chunks)")
+    for c in retrieved_chunks:
+        print(f"  - {c.source_type}: {c.source_path}")
 
     log.info("app_ready")
 

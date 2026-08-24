@@ -25,6 +25,9 @@ class Settings(BaseSettings):
      # --- LLM provider ---
     groq_api_key: str = ""
     groq_model: str = "openai/gpt-oss-120b"
+        # --- Azure Blob Storage ---
+    azure_storage_connection_string: str = ""
+    azure_container_name: str = ""
 
     # We will add embedding/LLM/vector-db settings here in later steps,
     # ONLY when the code that needs them is being written. Not before.
