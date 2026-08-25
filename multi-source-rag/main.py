@@ -18,6 +18,7 @@ from app.embeddings.local_embedder import LocalEmbedder
 from app.vectorstore.qdrant_store import QdrantStore
 from app.generation.groq_llm import GroqLLM
 from app.generation.prompt import build_rag_prompt
+from app.ingestion.api_loader import APILoader
 
 configure_logging()
 log = get_logger(__name__)
@@ -48,6 +49,8 @@ def main() -> None:
         all_documents.extend(azure_loader.load())
     else:
         log.warning("azure_source_skipped_not_configured")
+        api_loader = APILoader(search_query="retrieval augmented generation", max_results=3)
+        all_documents.extend(api_loader.load())
 
     chunks = chunk_documents(all_documents, chunk_size=500, chunk_overlap=80)
     log.info("pipeline_summary", documents=len(all_documents), chunks=len(chunks))
