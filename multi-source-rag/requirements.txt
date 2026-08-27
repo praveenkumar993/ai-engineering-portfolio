@@ -5,3 +5,4 @@ qdrant-client==1.12.1
 groq==0.13.0
 azure-storage-blob==12.24.0
 requests==2.32.3
+boto3==1.35.0

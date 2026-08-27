@@ -28,6 +28,11 @@ class Settings(BaseSettings):
         # --- Azure Blob Storage ---
     azure_storage_connection_string: str = ""
     azure_container_name: str = ""
+        # --- AWS S3 ---
+    aws_s3_bucket_name: str = ""
+    aws_access_key_id: str = ""
+    aws_secret_access_key: str = ""
+    aws_region_name: str = "us-east-1"
 
     # We will add embedding/LLM/vector-db settings here in later steps,
     # ONLY when the code that needs them is being written. Not before.

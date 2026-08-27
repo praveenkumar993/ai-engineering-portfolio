@@ -19,6 +19,7 @@ from app.vectorstore.qdrant_store import QdrantStore
 from app.generation.groq_llm import GroqLLM
 from app.generation.prompt import build_rag_prompt
 from app.ingestion.api_loader import APILoader
+from app.ingestion.s3_loader import S3Loader
 
 configure_logging()
 log = get_logger(__name__)
@@ -51,6 +52,19 @@ def main() -> None:
         log.warning("azure_source_skipped_not_configured")
         api_loader = APILoader(search_query="retrieval augmented generation", max_results=3)
         all_documents.extend(api_loader.load())
+
+    # --- Step 5: S3 ingestion ---
+    if (settings.aws_s3_bucket_name.strip() and settings.aws_access_key_id.strip() 
+        and "your_access_key_id" not in settings.aws_access_key_id):
+        s3_loader = S3Loader(
+            bucket_name=settings.aws_s3_bucket_name,
+            access_key_id=settings.aws_access_key_id,
+            secret_access_key=settings.aws_secret_access_key,
+            region_name=settings.aws_region_name,
+        )
+        all_documents.extend(s3_loader.load())
+    else:
+        log.warning("s3_source_skipped_not_configured")
 
     chunks = chunk_documents(all_documents, chunk_size=500, chunk_overlap=80)
     log.info("pipeline_summary", documents=len(all_documents), chunks=len(chunks))
