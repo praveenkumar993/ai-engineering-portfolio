@@ -20,6 +20,7 @@ from app.generation.groq_llm import GroqLLM
 from app.generation.prompt import build_rag_prompt
 from app.ingestion.api_loader import APILoader
 from app.ingestion.s3_loader import S3Loader
+from app.reranker.cross_encoder_reranker import CrossEncoderReranker
 
 configure_logging()
 log = get_logger(__name__)
@@ -84,18 +85,23 @@ def main() -> None:
     store.add_chunks(chunks, vectors)
 
     # --- Step 4: retrieve + generate ---
+
     question = "What are the stages of a RAG pipeline?"
     query_vector = embedder.embed([question])[0]
-    retrieved_chunks = store.search(query_vector, top_k=3)
+    retrieved_chunks = store.search(query_vector, top_k=10)
 
-    prompt = build_rag_prompt(question, retrieved_chunks)
+    # --- Step 5: rerank ---
+    reranker = CrossEncoderReranker()
+    reranked_chunks = reranker.rerank(question, retrieved_chunks, top_k=3)
+
+    prompt = build_rag_prompt(question, reranked_chunks)
     llm = GroqLLM()
     answer = llm.generate(prompt)
 
     print(f"\nQuestion: {question}")
     print(f"\nAnswer:\n{answer}")
-    print(f"\n(Grounded in {len(retrieved_chunks)} retrieved chunks)")
-    for c in retrieved_chunks:
+    print(f"\n(Grounded in {len(reranked_chunks)} reranked chunks)")
+    for c in reranked_chunks:
         print(f"  - {c.source_type}: {c.source_path}")
 
     log.info("app_ready")
