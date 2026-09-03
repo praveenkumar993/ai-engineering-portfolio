@@ -25,6 +25,8 @@ from app.vectorstore.qdrant_store import QdrantStore
 from app.reranker.cross_encoder_reranker import CrossEncoderReranker
 from app.generation.groq_llm import GroqLLM
 from app.generation.pipeline import RAGPipeline
+from app.retrieval.bm25_retriever import BM25Retriever
+from app.retrieval.hybrid_retriever import HybridRetriever
 
 configure_logging()
 log = get_logger(__name__)
@@ -90,9 +92,12 @@ def main() -> None:
     store.add_chunks(chunks, vectors)
 
     # --- Step 8: build the pipeline and ask through it ---
+    bm25 = BM25Retriever(chunks)
+    hybrid_retriever = HybridRetriever(embedder=embedder, vector_store=store, bm25_retriever=bm25)
+
     reranker = CrossEncoderReranker()
     llm = GroqLLM()
-    pipeline = RAGPipeline(embedder=embedder, vector_store=store, reranker=reranker, llm=llm)
+    pipeline = RAGPipeline(retriever=hybrid_retriever, reranker=reranker, llm=llm)
 
     question = "What are the stages of a RAG pipeline?"
     response = pipeline.ask(question)

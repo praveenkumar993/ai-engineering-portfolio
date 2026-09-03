@@ -1,31 +1,9 @@
-"""
-RAGPipeline — orchestrates retrieve -> rerank -> generate, with an explicit
-fallback check at each stage instead of assuming every stage succeeds.
-
-Why pull this out of main.py:
-    main.py was starting to mix "wiring things together" with "business
-    logic" (what to do when retrieval is empty, etc). Separating them means
-    main.py just builds the components and calls pipeline.ask(question) --
-    and this class becomes reusable later by Step 9's FastAPI endpoint
-    without copy-pasting logic.
-
-The fallback chain, explicitly:
-    1. Vector search returns candidates -> if empty, stop and say so.
-    2. Reranker narrows to top_k -> if that's somehow empty, stop and say so.
-    3. LLM generates an answer -> GroqLLM already catches provider failures
-       internally and returns a safe string; here we just detect that case
-       by checking for its known failure message and mark the response
-       status accordingly, so callers can distinguish "no context" from
-       "LLM broke."
-"""
-
-from app.embeddings.base import BaseEmbedder
 from app.generation.base import BaseLLM
 from app.generation.prompt import build_rag_prompt
 from app.generation.response import RAGResponse, ResponseStatus
 from app.logger import get_logger
 from app.reranker.base import BaseReranker
-from app.vectorstore.base import BaseVectorStore
+from app.retrieval.hybrid_retriever import HybridRetriever
 
 log = get_logger(__name__)
 
@@ -35,23 +13,21 @@ LLM_FAILURE_MARKER = "I'm having trouble generating an answer right now"
 class RAGPipeline:
     def __init__(
         self,
-        embedder: BaseEmbedder,
-        vector_store: BaseVectorStore,
+        retriever: HybridRetriever,
         reranker: BaseReranker,
         llm: BaseLLM,
         search_top_k: int = 10,
         final_top_k: int = 3,
     ):
-        self.embedder = embedder
-        self.vector_store = vector_store
+        self.retriever = retriever
         self.reranker = reranker
         self.llm = llm
         self.search_top_k = search_top_k
         self.final_top_k = final_top_k
 
     def ask(self, question: str) -> RAGResponse:
-        query_vector = self.embedder.embed([question])[0]
-        candidates = self.vector_store.search(query_vector, top_k=self.search_top_k)
+        # --- Stage 1: hybrid retrieve (semantic + BM25, fused) ---
+        candidates = self.retriever.search(question, top_k=self.search_top_k)
 
         if not candidates:
             log.warning("no_candidates_found", question=question)
