@@ -8,6 +8,7 @@ from app.retrieval.hybrid_retriever import HybridRetriever
 log = get_logger(__name__)
 
 LLM_FAILURE_MARKER = "I'm having trouble generating an answer right now"
+MIN_RELEVANCE_SCORE = 0.0  # cross-encoder scores below this are treated as "not relevant"
 
 
 class RAGPipeline:
@@ -44,6 +45,20 @@ class RAGPipeline:
             return RAGResponse(
                 status=ResponseStatus.NO_CONTEXT,
                 answer="I couldn't find relevant information to answer that question.",
+                sources=[],
+            )
+
+        # Even if reranking returned chunks, check if the BEST one actually
+        # meets a minimum relevance bar. A negative or near-zero cross-encoder
+        # score means "nothing here is genuinely relevant" -- we should treat
+        # that the same as finding no context at all, rather than passing
+        # weak/irrelevant chunks to the LLM.
+        top_score = getattr(self.reranker, "last_top_score", None)
+        if top_score is not None and top_score < MIN_RELEVANCE_SCORE:
+            log.warning("reranking_below_relevance_threshold", question=question, top_score=top_score)
+            return RAGResponse(
+                status=ResponseStatus.NO_CONTEXT,
+                answer="I don't have enough information in the provided documents to answer that.",
                 sources=[],
             )
 

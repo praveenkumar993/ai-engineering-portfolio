@@ -38,6 +38,7 @@ class CrossEncoderReranker(BaseReranker):
     def __init__(self, model_name: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"):
         log.info("reranker_loading", model=model_name)
         self.model = CrossEncoder(model_name)
+        self.last_top_score: float | None = None
         log.info("reranker_loaded", model=model_name)
 
     def rerank(self, query: str, chunks: list[Chunk], top_k: int) -> list[Chunk]:
@@ -52,10 +53,14 @@ class CrossEncoderReranker(BaseReranker):
 
         reranked = [chunk for chunk, score in scored_chunks[:top_k]]
 
+        # Stash the top score so the pipeline can check relevance afterward.
+        self.last_top_score = float(scored_chunks[0][1]) if scored_chunks else None
+
         log.info(
             "reranking_completed",
             input_count=len(chunks),
             output_count=len(reranked),
-            top_score=float(scored_chunks[0][1]) if scored_chunks else None,
+            top_score=self.last_top_score,
+
         )
         return reranked
