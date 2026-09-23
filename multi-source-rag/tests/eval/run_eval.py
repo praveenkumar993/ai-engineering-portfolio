@@ -38,7 +38,7 @@ def build_pipeline_for_eval() -> RAGPipeline:
     embedder = LocalEmbedder()
     vectors = embedder.embed([c.text for c in chunks])
 
-    store = QdrantStore(collection_name="rag_chunks_eval", dimension=embedder.dimension)
+    store = QdrantStore(collection_name="rag_chunks_eval", dimension=embedder.dimension, url=settings.qdrant_url)
     store.add_chunks(chunks, vectors)
 
     bm25 = BM25Retriever(chunks)

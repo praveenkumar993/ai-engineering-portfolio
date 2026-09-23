@@ -82,7 +82,7 @@ def build_pipeline() -> RAGPipeline:
     embedder = LocalEmbedder()
     vectors = embedder.embed([c.text for c in chunks]) if chunks else []
 
-    store = QdrantStore(collection_name="rag_chunks", dimension=embedder.dimension)
+    store = QdrantStore(collection_name="rag_chunks", dimension=embedder.dimension, url=settings.qdrant_url)
     if chunks:
         store.add_chunks(chunks, vectors)
         

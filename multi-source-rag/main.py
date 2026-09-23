@@ -88,7 +88,7 @@ def main() -> None:
     embedder = LocalEmbedder()
     vectors = embedder.embed([c.text for c in chunks])
 
-    store = QdrantStore(collection_name="rag_chunks", dimension=embedder.dimension)
+    store = QdrantStore(collection_name="rag_chunks", dimension=embedder.dimension, url=settings.qdrant_url)
     store.add_chunks(chunks, vectors)
 
     # --- Step 8: build the pipeline and ask through it ---

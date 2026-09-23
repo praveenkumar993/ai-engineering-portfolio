@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     # --- App identity ---
     app_name: str = "multi-source-rag"
     environment: str = "dev"  # dev | staging | prod
+    qdrant_url: str = ""  # if set, use a real Qdrant server; else local-disk mode
 
     # --- Logging ---
     log_level: str = "INFO"

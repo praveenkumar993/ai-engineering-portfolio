@@ -22,9 +22,16 @@ log = get_logger(__name__)
 
 
 class QdrantStore(BaseVectorStore):
-    def __init__(self, collection_name: str, dimension: int, path: str = "./qdrant_data"):
+    def __init__(self, collection_name: str, dimension: int, path: str = "./qdrant_data", url: str = ""):
         self.collection_name = collection_name
-        self.client = QdrantClient(path=path)
+        # If a URL is configured (Docker/production), connect to a real
+        # Qdrant server. Otherwise fall back to local-disk mode (local dev
+        # without Docker) -- exactly the "one-line change" we set up for
+        # back in Step 3.
+        if url:
+            self.client = QdrantClient(url=url)
+        else:
+            self.client = QdrantClient(path=path)
 
         if not self.client.collection_exists(collection_name):
             self.client.create_collection(
