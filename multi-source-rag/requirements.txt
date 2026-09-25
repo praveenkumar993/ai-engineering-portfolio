@@ -1,5 +1,6 @@
 pydantic-settings==2.7.1
 structlog==24.4.0
+unstructured[pdf,csv]==0.16.11
 sentence-transformers==3.3.1
 qdrant-client==1.12.1
 groq==0.13.0
