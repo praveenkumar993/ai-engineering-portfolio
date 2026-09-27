@@ -9,3 +9,4 @@ venv/
 qdrant_data/
 qdrant_data_small/
 qdrant_data_large/
+logs/
