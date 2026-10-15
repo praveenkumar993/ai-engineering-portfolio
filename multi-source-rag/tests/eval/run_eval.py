@@ -71,6 +71,7 @@ def run_eval() -> None:
             "answer_correct": answer_correct,
             "retrieval_correct": retrieval_correct,
             "answer": response.answer,
+            "top_score": response.top_score,
         })
 
     total = len(results)
@@ -82,7 +83,8 @@ def run_eval() -> None:
 
     for r in results:
         status = "PASS" if r["passed"] else "FAIL"
-        print(f"[{status}] {r['question']}")
+        score = f"{r['top_score']:.2f}" if r["top_score"] is not None else "n/a"
+        print(f"[{status}] (top_score={score}) {r['question']}")
         if not r["passed"]:
             print(f"       answer_correct={r['answer_correct']}, retrieval_correct={r['retrieval_correct']}")
             print(f"       got: {r['answer'][:150]}")

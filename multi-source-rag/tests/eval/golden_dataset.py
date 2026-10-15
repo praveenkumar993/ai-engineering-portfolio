@@ -33,4 +33,25 @@ GOLDEN_DATASET = [
         "expected_keywords": ["don't have enough information"],
         "expected_source_contains": None,
     },
+    # --- Borderline positives: answerable, but phrased far from the source
+    # text. These scored -1.7 to -4.3 in the reranking comparison, so they
+    # test that the threshold isn't too strict.
+    {
+        "question": "How do production systems handle failures?",
+        "expected_keywords": ["fallback"],
+        "expected_source_contains": "sample_rag_test.pdf",
+    },
+    {
+        "question": "What happens to a document before it is stored?",
+        "expected_keywords": ["chunk"],
+        "expected_source_contains": "sample_rag_test.pdf",
+    },
+    # --- Near-miss negative: on the same general subject (AI) but NOT in
+    # our documents. This tests the opposite side: that the threshold isn't
+    # too lenient. It is the hardest refusal case in the set.
+    {
+        "question": "How many parameters does GPT-4 have?",
+        "expected_keywords": ["don't have enough information"],
+        "expected_source_contains": None,
+    },
 ]

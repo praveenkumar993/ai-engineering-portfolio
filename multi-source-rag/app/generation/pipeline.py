@@ -1,3 +1,22 @@
+"""
+RAGPipeline — orchestrates retrieve -> rerank -> generate, with an explicit
+fallback check at each stage instead of assuming every stage succeeds.
+
+The fallback chain:
+    1. Hybrid retrieval returns candidates -> if empty, stop and say so.
+    2. Reranker scores them -> if the BEST score is below the configured
+       threshold, stop: nothing here is relevant enough to answer from.
+    3. LLM generates an answer -> if the provider failed, mark LLM_ERROR so
+       callers can tell "no context" apart from "LLM broke."
+
+Why the threshold is configurable, not hardcoded:
+    Cross-encoder scores are a relative ranking signal, not a calibrated
+    probability, so there's no universally correct cutoff. It depends on
+    the model and the documents. We tune it against the golden dataset
+    (tests/eval) and keep it in config so it can change without a deploy.
+"""
+
+from app.config import settings
 from app.generation.base import BaseLLM
 from app.generation.prompt import build_rag_prompt
 from app.generation.response import RAGResponse, ResponseStatus
@@ -8,7 +27,6 @@ from app.retrieval.hybrid_retriever import HybridRetriever
 log = get_logger(__name__)
 
 LLM_FAILURE_MARKER = "I'm having trouble generating an answer right now"
-MIN_RELEVANCE_SCORE = 0.0  # cross-encoder scores below this are treated as "not relevant"
 
 
 class RAGPipeline:
@@ -19,12 +37,18 @@ class RAGPipeline:
         llm: BaseLLM,
         search_top_k: int = 10,
         final_top_k: int = 3,
+        min_relevance_score: float | None = None,
     ):
         self.retriever = retriever
         self.reranker = reranker
         self.llm = llm
         self.search_top_k = search_top_k
         self.final_top_k = final_top_k
+        self.min_relevance_score = (
+            settings.min_relevance_score
+            if min_relevance_score is None
+            else min_relevance_score
+        )
 
     def ask(self, question: str) -> RAGResponse:
         # --- Stage 1: hybrid retrieve (semantic + BM25, fused) ---
@@ -35,33 +59,37 @@ class RAGPipeline:
             return RAGResponse(
                 status=ResponseStatus.NO_CONTEXT,
                 answer="I don't have any indexed documents relevant to that question.",
-                sources=[],
             )
 
-        top_chunks = self.reranker.rerank(question, candidates, top_k=self.final_top_k)
+        # --- Stage 2: rerank, then check the best match is relevant enough ---
+        scored = self.reranker.rerank_with_scores(
+            question, candidates, top_k=self.final_top_k
+        )
 
-        if not top_chunks:
+        if not scored:
             log.warning("reranking_produced_no_results", question=question)
             return RAGResponse(
                 status=ResponseStatus.NO_CONTEXT,
                 answer="I couldn't find relevant information to answer that question.",
-                sources=[],
             )
 
-        # Even if reranking returned chunks, check if the BEST one actually
-        # meets a minimum relevance bar. A negative or near-zero cross-encoder
-        # score means "nothing here is genuinely relevant" -- we should treat
-        # that the same as finding no context at all, rather than passing
-        # weak/irrelevant chunks to the LLM.
-        top_score = getattr(self.reranker, "last_top_score", None)
-        if top_score is not None and top_score < MIN_RELEVANCE_SCORE:
-            log.warning("reranking_below_relevance_threshold", question=question, top_score=top_score)
+        top_score = scored[0][1]
+        if top_score < self.min_relevance_score:
+            log.warning(
+                "reranking_below_relevance_threshold",
+                question=question,
+                top_score=top_score,
+                threshold=self.min_relevance_score,
+            )
             return RAGResponse(
                 status=ResponseStatus.NO_CONTEXT,
                 answer="I don't have enough information in the provided documents to answer that.",
-                sources=[],
+                top_score=top_score,
             )
 
+        top_chunks = [chunk for chunk, _ in scored]
+
+        # --- Stage 3: generate ---
         prompt = build_rag_prompt(question, top_chunks)
         answer = self.llm.generate(prompt)
 
@@ -71,6 +99,7 @@ class RAGPipeline:
                 status=ResponseStatus.LLM_ERROR,
                 answer=answer,
                 sources=top_chunks,
+                top_score=top_score,
             )
 
         log.info("pipeline_answered_successfully", question=question, sources=len(top_chunks))
@@ -78,4 +107,5 @@ class RAGPipeline:
             status=ResponseStatus.OK,
             answer=answer,
             sources=top_chunks,
+            top_score=top_score,
         )

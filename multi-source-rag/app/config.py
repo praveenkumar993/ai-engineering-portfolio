@@ -35,6 +35,10 @@ class Settings(BaseSettings):
     aws_access_key_id: str = ""
     aws_secret_access_key: str = ""
     aws_region_name: str = "us-east-1"
+        # --- Retrieval quality ---
+    # Cross-encoder scores below this are treated as "no relevant context".
+    # Override without a code change via MIN_RELEVANCE_SCORE in .env.
+    min_relevance_score: float = -7.0
 
     # We will add embedding/LLM/vector-db settings here in later steps,
     # ONLY when the code that needs them is being written. Not before.
