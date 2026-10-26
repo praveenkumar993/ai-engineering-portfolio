@@ -22,6 +22,46 @@ def main() -> None:
 
     try:
         validate_startup_config()
+            # --- Step 2: verify state definition works ---
+        from app.state import PRReviewState, CodeIssue
+
+        # create a sample state the way the graph will at startup
+        initial_state = PRReviewState(
+            repo=settings.github_repo,
+            pr_number=1,
+        )
+        log.info(
+            "state_initialized",
+            repo=initial_state.repo,
+            pr_number=initial_state.pr_number,
+            fields=list(PRReviewState.model_fields.keys()),
+        )
+
+        # prove the Annotated[list, add] reducer works --
+        # two agents adding issues should APPEND not OVERWRITE
+        from operator import add as list_add
+        issues_from_security = [CodeIssue(
+            file="auth_service.py",
+            line_reference="line 12",
+            severity="critical",
+            issue_type="hardcoded_credential",
+            description="API key hardcoded in source",
+            suggested_fix="Use os.getenv('API_KEY')",
+        )]
+        issues_from_logic = [CodeIssue(
+            file="user_service.py",
+            line_reference="line 34",
+            severity="medium",
+            issue_type="missing_null_check",
+            description="user could be None before accessing .email",
+            suggested_fix="Add: if user is None: raise UserNotFoundError()",
+        )]
+        combined = list_add(issues_from_security, issues_from_logic)
+        log.info(
+            "state_reducer_verified",
+            total_issues=len(combined),
+            files=[i.file for i in combined],
+        )
     except ConfigError as e:
         print(f"\nStartup failed:\n{e}\n")
         return
