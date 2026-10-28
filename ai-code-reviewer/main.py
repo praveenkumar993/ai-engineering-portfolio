@@ -62,6 +62,17 @@ def main() -> None:
             total_issues=len(combined),
             files=[i.file for i in combined],
         )
+
+        # --- Step 3: verify GitHub client can connect ---
+        from app.mcp_client.github_client import get_github_client
+
+        try:
+            client = get_github_client()
+            log.info("github_client_verified", repo=settings.github_repo)
+        except Exception as e:
+            log.error("github_client_verification_failed", error=str(e))
+            return
+
     except ConfigError as e:
         print(f"\nStartup failed:\n{e}\n")
         return
