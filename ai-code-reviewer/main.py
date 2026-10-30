@@ -73,6 +73,30 @@ def main() -> None:
             log.error("github_client_verification_failed", error=str(e))
             return
 
+            # --- Step 4: PR Fetcher node ---
+        from app.nodes.pr_fetcher import pr_fetcher_node
+        from app.state import PRReviewState
+
+        state = PRReviewState(
+            repo=settings.github_repo,
+            pr_number=1,
+        )
+
+        log.info("pr_fetcher_running", pr_number=state.pr_number)
+        updates = pr_fetcher_node(state, client)
+
+        if updates.get("error"):
+            log.error("pr_fetcher_error", detail=updates["error"])
+            return
+
+        log.info(
+            "pr_fetcher_result",
+            pr_title=updates["pr_title"],
+            changed_files=updates["changed_files"],
+            files_read=list(updates["file_contents"].keys()),
+            diff_preview=updates["diff"][:200],
+        )
+
     except ConfigError as e:
         print(f"\nStartup failed:\n{e}\n")
         return
