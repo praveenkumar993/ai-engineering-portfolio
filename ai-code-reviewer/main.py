@@ -97,6 +97,27 @@ def main() -> None:
             diff_preview=updates["diff"][:200],
         )
 
+            # --- Step 5: Summarizer node ---
+        from app.llm import get_llm
+        from app.nodes.summarizer import summarizer_node
+
+        # LangGraph will do this merge for us in Step 6. Until then we
+        # do it by hand, so the Summarizer sees what the Fetcher wrote.
+        state = state.model_copy(update=updates)
+
+        llm = get_llm()
+        summary_updates = summarizer_node(state, llm)
+
+        if summary_updates.get("error"):
+            log.error("summarizer_error", detail=summary_updates["error"])
+            return
+
+        print("\n" + "=" * 60)
+        print("PR SUMMARY")
+        print("=" * 60)
+        print(summary_updates["summary"])
+        print("=" * 60 + "\n")
+
     except ConfigError as e:
         print(f"\nStartup failed:\n{e}\n")
         return

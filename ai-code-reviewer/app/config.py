@@ -46,6 +46,10 @@ class Settings(BaseSettings):
     # automatically (useful once you trust the agent's quality).
     require_human_approval: bool = True
 
+    # Diffs longer than this are truncated before being sent to the LLM,
+    # so one huge PR can't overflow the model's context window.
+    max_diff_chars: int = 30000
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
