@@ -63,6 +63,18 @@ def main() -> None:
     print(final_state["summary"])
     print("=" * 60)
 
+    # --- Show supervisor decision ---
+    if final_state.get("agent_decision"):
+        decision = final_state["agent_decision"]
+        print("\n" + "=" * 60)
+        print("SUPERVISOR DECISION")
+        print("=" * 60)
+        print(f"Run security agent: {decision.run_security}")
+        print(f"Run logic agent:    {decision.run_logic}")
+        print(f"Run design agent:   {decision.run_design}")
+        print(f"Reason: {decision.reason}")
+        print("=" * 60 + "\n")
+
     log.info(
         "graph_run_completed",
         summary_chars=len(final_state["summary"]),
