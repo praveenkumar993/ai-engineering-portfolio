@@ -75,6 +75,27 @@ def main() -> None:
         print(f"Reason: {decision.reason}")
         print("=" * 60 + "\n")
 
+    # --- Show specialist agent results ---
+    security_issues = final_state.get("security_issues", [])
+    logic_issues = final_state.get("logic_issues", [])
+    design_issues = final_state.get("design_issues", [])
+
+    all_issues = security_issues + logic_issues + design_issues
+
+    print("\n" + "=" * 60)
+    print(f"ISSUES FOUND: {len(all_issues)} total")
+    print(f"  Security: {len(security_issues)}")
+    print(f"  Logic:    {len(logic_issues)}")
+    print(f"  Design:   {len(design_issues)}")
+    print("=" * 60)
+
+    for issue in all_issues:
+        print(f"\n[{issue.severity.upper()}] {issue.issue_type}")
+        print(f"  File: {issue.file}")
+        print(f"  Where: {issue.line_reference}")
+        print(f"  What: {issue.description}")
+        print(f"  Fix: {issue.suggested_fix}")
+
     log.info(
         "graph_run_completed",
         summary_chars=len(final_state["summary"]),

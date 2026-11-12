@@ -154,11 +154,16 @@ class GitHubClient:
         Let me search for db.query to compare patterns."
         """
         try:
-            # GitHub code search requires "repo:owner/name" qualifier
+            # GitHub code search requires "repo:owner/name" qualifier.
+            # PyGitHub returns a PaginatedList, which is not safe to slice
+            # (it can trigger IndexError for lazy pagination). Iterate it
+            # directly and stop after the limit.
             full_query = f"{query} repo:{self.repo_name}"
             results = self.github.search_code(full_query)
             matches = []
-            for item in results[:10]:  # cap at 10 to avoid rate limits
+            for i, item in enumerate(results):
+                if i >= 10:
+                    break
                 if item.path.endswith(file_extension):
                     matches.append({
                         "path": item.path,
