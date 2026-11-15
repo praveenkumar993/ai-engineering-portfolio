@@ -2,19 +2,14 @@
 graph.py -- builds and compiles the LangGraph review graph.
 
 Step 6: PR Fetcher -> Summarizer
-Step 7: + Supervisor (routing decision)
-Step 8: + Security, Logic, Design agents (parallel via Send)
-
-The Send pattern fans out to multiple agents simultaneously.
-LangGraph runs all selected agents in parallel, waits for all
-to finish, then merges their results into shared state using
-the list reducers defined on PRReviewState.
+Step 7: + Supervisor
+Step 8: + Security, Logic, Design agents (sequential)
+Step 9: + Writer (synthesizes all findings into one review comment)
 """
 
 import functools
 
 from langgraph.graph import END, START, StateGraph
-from langgraph.types import Send
 
 from app.llm import get_llm
 from app.logger import get_logger
@@ -28,6 +23,7 @@ from app.nodes.agents import (
     design_agent_node,
 )
 from app.nodes.tools import make_tools
+from app.nodes.writer import writer_node
 from app.state import PRReviewState
 
 log = get_logger(__name__)
@@ -41,13 +37,8 @@ def _should_continue(state: PRReviewState) -> str:
 
 
 def _route_after_supervisor(state: PRReviewState) -> str:
-    """
-    After supervisor, go to whichever agent should run first.
-    Agents run sequentially: security -> logic -> design -> END.
-    Each agent's edge checks the decision to skip if not needed.
-    """
     if state.error or not state.agent_decision:
-        return END
+        return "writer"
     decision = state.agent_decision
     if decision.run_security:
         return "security_agent"
@@ -55,27 +46,28 @@ def _route_after_supervisor(state: PRReviewState) -> str:
         return "logic_agent"
     if decision.run_design:
         return "design_agent"
-    return END
+    return "writer"
 
 
 def _route_after_security(state: PRReviewState) -> str:
     if state.error:
-        return END
+        return "writer"
     decision = state.agent_decision
     if decision and decision.run_logic:
         return "logic_agent"
     if decision and decision.run_design:
         return "design_agent"
-    return END
+    return "writer"
 
 
 def _route_after_logic(state: PRReviewState) -> str:
     if state.error:
-        return END
+        return "writer"
     decision = state.agent_decision
     if decision and decision.run_design:
         return "design_agent"
-    return END
+    return "writer"
+
 
 def build_graph(github_client: GitHubClient):
     llm = get_llm()
@@ -87,6 +79,7 @@ def build_graph(github_client: GitHubClient):
     security = functools.partial(security_agent_node, llm=llm, tools=tools)
     logic = functools.partial(logic_agent_node, llm=llm, tools=tools)
     design = functools.partial(design_agent_node, llm=llm, tools=tools)
+    writer = functools.partial(writer_node, llm=llm)
 
     builder = StateGraph(PRReviewState)
 
@@ -97,6 +90,7 @@ def build_graph(github_client: GitHubClient):
     builder.add_node("security_agent", security)
     builder.add_node("logic_agent", logic)
     builder.add_node("design_agent", design)
+    builder.add_node("writer", writer)
 
     # --- Wire edges ---
     builder.add_edge(START, "pr_fetcher")
@@ -111,8 +105,6 @@ def build_graph(github_client: GitHubClient):
         _should_continue,
         {"continue": "supervisor", END: END},
     )
-
-        # Supervisor -> first agent (sequential, not parallel)
     builder.add_conditional_edges(
         "supervisor",
         _route_after_supervisor,
@@ -120,34 +112,37 @@ def build_graph(github_client: GitHubClient):
             "security_agent": "security_agent",
             "logic_agent": "logic_agent",
             "design_agent": "design_agent",
-            END: END,
+            "writer": "writer",
         },
     )
-
-    # security -> logic or design or END
     builder.add_conditional_edges(
         "security_agent",
         _route_after_security,
         {
             "logic_agent": "logic_agent",
             "design_agent": "design_agent",
-            END: END,
+            "writer": "writer",
         },
     )
-
-    # logic -> design or END
     builder.add_conditional_edges(
         "logic_agent",
         _route_after_logic,
         {
             "design_agent": "design_agent",
-            END: END,
+            "writer": "writer",
         },
     )
 
-    # design always goes to END
-    # Step 9 replaces END with the Writer node
-    builder.add_edge("design_agent", END)
+    # design always goes to writer
+    builder.add_edge("design_agent", "writer")
+
+    # writer goes to END
+    # Step 10 adds the Publisher node here
+    builder.add_conditional_edges(
+        "writer",
+        _should_continue,
+        {"continue": END, END: END},
+    )
 
     graph = builder.compile()
     log.info("graph_compiled", nodes=list(builder.nodes))
