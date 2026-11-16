@@ -75,21 +75,30 @@ def main() -> None:
         print(f"Reason: {decision.reason}")
         print("=" * 60 + "\n")
 
-    # --- Show the final review ---
+    # --- Show result ---
     review = final_state.get("review_comment", "")
+    posted = final_state.get("review_posted", False)
+
     if review:
         print("\n" + "=" * 60)
         print("FINAL REVIEW COMMENT")
         print("=" * 60)
         print(review)
         print("=" * 60 + "\n")
+
+    if posted:
+        print(f"✅ Review posted to GitHub PR #{1}")
+        print(f"   https://github.com/{settings.github_repo}/pull/1")
     else:
-        log.warning("no_review_comment_produced")
+        print("❌ Review was not posted to GitHub.")
+        if review:
+            print("   The review comment is shown above.")
 
     log.info(
         "graph_run_completed",
-        summary_chars=len(final_state["summary"]),
-        changed_files=final_state["changed_files"],
+        summary_chars=len(final_state.get("summary", "")),
+        changed_files=final_state.get("changed_files", []),
+        review_posted=posted,
     )
 
 

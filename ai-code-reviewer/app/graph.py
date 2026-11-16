@@ -1,10 +1,16 @@
 """
 graph.py -- builds and compiles the LangGraph review graph.
 
-Step 6: PR Fetcher -> Summarizer
-Step 7: + Supervisor
-Step 8: + Security, Logic, Design agents (sequential)
-Step 9: + Writer (synthesizes all findings into one review comment)
+Step 6:  PR Fetcher -> Summarizer
+Step 7:  + Supervisor
+Step 8:  + Security, Logic, Design agents (sequential)
+Step 9:  + Writer
+Step 10: + Publisher (posts review to GitHub)
+
+Complete pipeline:
+    pr_fetcher -> summarizer -> supervisor
+        -> security_agent -> logic_agent -> design_agent
+        -> writer -> publisher -> END
 """
 
 import functools
@@ -14,14 +20,15 @@ from langgraph.graph import END, START, StateGraph
 from app.llm import get_llm
 from app.logger import get_logger
 from app.mcp_client.github_client import GitHubClient
+from app.nodes.agents import (
+    design_agent_node,
+    logic_agent_node,
+    security_agent_node,
+)
 from app.nodes.pr_fetcher import pr_fetcher_node
+from app.nodes.publisher import publisher_node
 from app.nodes.summarizer import summarizer_node
 from app.nodes.supervisor import supervisor_node
-from app.nodes.agents import (
-    security_agent_node,
-    logic_agent_node,
-    design_agent_node,
-)
 from app.nodes.tools import make_tools
 from app.nodes.writer import writer_node
 from app.state import PRReviewState
@@ -80,6 +87,7 @@ def build_graph(github_client: GitHubClient):
     logic = functools.partial(logic_agent_node, llm=llm, tools=tools)
     design = functools.partial(design_agent_node, llm=llm, tools=tools)
     writer = functools.partial(writer_node, llm=llm)
+    publisher = functools.partial(publisher_node, client=github_client)
 
     builder = StateGraph(PRReviewState)
 
@@ -91,6 +99,7 @@ def build_graph(github_client: GitHubClient):
     builder.add_node("logic_agent", logic)
     builder.add_node("design_agent", design)
     builder.add_node("writer", writer)
+    builder.add_node("publisher", publisher)
 
     # --- Wire edges ---
     builder.add_edge(START, "pr_fetcher")
@@ -136,13 +145,15 @@ def build_graph(github_client: GitHubClient):
     # design always goes to writer
     builder.add_edge("design_agent", "writer")
 
-    # writer goes to END
-    # Step 10 adds the Publisher node here
+    # writer always goes to publisher
     builder.add_conditional_edges(
         "writer",
         _should_continue,
-        {"continue": END, END: END},
+        {"continue": "publisher", END: END},
     )
+
+    # publisher always goes to END
+    builder.add_edge("publisher", END)
 
     graph = builder.compile()
     log.info("graph_compiled", nodes=list(builder.nodes))
