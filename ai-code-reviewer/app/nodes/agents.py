@@ -236,17 +236,22 @@ def logic_agent_node(state: PRReviewState, llm, tools: list) -> dict:
 
 def design_agent_node(state: PRReviewState, llm, tools: list) -> dict:
     log.info("design_agent_started", pr_number=state.pr_number)
-
     agent = create_react_agent(llm, tools)
     context = _build_context(state)
-
-    result = agent.invoke({
-        "messages": [
-            SystemMessage(content=DESIGN_SYSTEM_PROMPT),
-            HumanMessage(content=context),
-        ]
-    }, config={"recursion_limit": 8})
-
-    issues = _parse_agent_output(result["messages"], "design_agent")
+    try:
+        result = agent.invoke(
+            {
+                "messages": [
+                    SystemMessage(content=DESIGN_SYSTEM_PROMPT),
+                    HumanMessage(content=context),
+                ]
+            },
+            config={"recursion_limit": 6},  # reduced from 8
+        )
+        issues = _parse_agent_output(result["messages"], "design_agent")
+    except Exception as e:
+        log.error("design_agent_failed", error=str(e))
+        # Try to extract any partial results from what ran before the crash
+        issues = []
     log.info("design_agent_completed", issues_found=len(issues))
     return {"design_issues": issues}

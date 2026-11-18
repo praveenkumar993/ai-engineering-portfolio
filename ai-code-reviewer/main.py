@@ -1,22 +1,31 @@
 """
 Entry point.
 
-Step 1: config + logging spine.
-Step 2: PRReviewState definition verified.
-Step 3: GitHub client verified.
-Step 4: PR Fetcher node verified.
-Step 5: Summarizer node verified.
-Step 6: first working LangGraph graph -- PR Fetcher -> Summarizer.
-        LangGraph now manages state transitions instead of us doing
-        it manually.
+Step 11: Human-in-the-loop approval gate added between Writer
+         and Publisher. The graph now runs in two phases:
+
+Phase 1: pr_fetcher -> summarizer -> supervisor -> agents -> writer
+         -> human_approval [PAUSE]
+         The review is shown to the operator. Graph is frozen.
+
+Phase 2: operator types 'approve' or 'reject'
+         Graph resumes from the checkpoint.
+         'approve' -> publisher -> review posted to GitHub
+         'reject'  -> graph ends, review discarded
 """
 
 from app.config import settings
 from app.logger import configure_logging, get_logger
 from app.startup_checks import validate_startup_config, ConfigError
+from app.state import PRReviewState
 
 configure_logging()
 log = get_logger(__name__)
+
+# A thread_id ties both phases of a run together.
+# LangGraph uses it to find the right checkpoint when resuming.
+# Using the PR number means each PR has its own checkpoint thread.
+THREAD_CONFIG = {"configurable": {"thread_id": "pr-1"}}
 
 
 def main() -> None:
@@ -32,78 +41,91 @@ def main() -> None:
         print(f"\nStartup failed:\n{e}\n")
         return
 
-    # --- Build graph ---
     from app.mcp_client.github_client import get_github_client
     from app.graph import build_graph
 
     github_client = get_github_client()
     graph = build_graph(github_client)
 
-    # --- Run the graph ---
-    # graph.invoke() takes the initial state values and returns the
-    # final state after all nodes have run. LangGraph handles every
-    # state merge, every conditional edge, and every node call.
+    # --- Phase 1: run the graph until it pauses ---
     log.info("graph_run_started", pr_number=1)
 
-    final_state = graph.invoke(
-        PRReviewState(
-            repo=settings.github_repo,
-            pr_number=1,
-        )
+    initial_state = PRReviewState(
+        repo=settings.github_repo,
+        pr_number=1,
     )
 
-    # --- Show results ---
-    if final_state.get("error"):
-        log.error("graph_run_failed", error=final_state["error"])
-        return
+    # stream() lets us see the interrupt event as it happens.
+    # invoke() would work too but would silently swallow the pause.
+    events = list(graph.stream(
+        initial_state,
+        config=THREAD_CONFIG,
+        stream_mode="values",
+    ))
 
-    print("\n" + "=" * 60)
-    print("PR SUMMARY")
-    print("=" * 60)
-    print(final_state["summary"])
-    print("=" * 60)
+    # Check if the graph paused at the interrupt
+    state_snapshot = graph.get_state(THREAD_CONFIG)
 
-    # --- Show supervisor decision ---
-    if final_state.get("agent_decision"):
-        decision = final_state["agent_decision"]
+    if state_snapshot.next == ("human_approval",):
+        # Graph is paused inside human_approval_node waiting for input
+        review = state_snapshot.values.get("review_comment", "")
+
         print("\n" + "=" * 60)
-        print("SUPERVISOR DECISION")
+        print("DRAFT REVIEW — WAITING FOR APPROVAL")
         print("=" * 60)
-        print(f"Run security agent: {decision.run_security}")
-        print(f"Run logic agent:    {decision.run_logic}")
-        print(f"Run design agent:   {decision.run_design}")
-        print(f"Reason: {decision.reason}")
-        print("=" * 60 + "\n")
+        print(review)
+        print("=" * 60)
+        print("\nOptions:")
+        print("  approve / yes / y  → post the review to GitHub")
+        print("  reject  / no  / n  → discard, do not post")
+        print()
+
+        decision = input("Your decision: ").strip().lower()
+
+        # --- Phase 2: resume the graph with the operator's decision ---
+        log.info("graph_resuming", decision=decision)
+
+        final_events = list(graph.stream(
+            # None means "resume from checkpoint, don't restart"
+            # The Command with resume passes our decision to interrupt()
+            {"type": "resume", "value": decision} if False else None,
+            config=THREAD_CONFIG,
+            stream_mode="values",
+        ))
+
+        # Pass the decision back through the resume mechanism
+        from langgraph.types import Command
+        final_events = list(graph.stream(
+            Command(resume=decision),
+            config=THREAD_CONFIG,
+            stream_mode="values",
+        ))
+
+        final_state = graph.get_state(THREAD_CONFIG).values
+
+    else:
+        # Graph completed without pausing (require_human_approval=False)
+        final_state = state_snapshot.values
 
     # --- Show result ---
     review = final_state.get("review_comment", "")
     posted = final_state.get("review_posted", False)
+    error = final_state.get("error", "")
 
-    if review:
-        print("\n" + "=" * 60)
-        print("FINAL REVIEW COMMENT")
-        print("=" * 60)
-        print(review)
-        print("=" * 60 + "\n")
-
-    if posted:
-        print(f"✅ Review posted to GitHub PR #{1}")
+    if error:
+        print(f"\n❌ {error}")
+    elif posted:
+        print(f"\n✅ Review posted to GitHub PR #1")
         print(f"   https://github.com/{settings.github_repo}/pull/1")
     else:
-        print("❌ Review was not posted to GitHub.")
-        if review:
-            print("   The review comment is shown above.")
+        print("\n⚠️  Review was produced but not posted.")
 
     log.info(
         "graph_run_completed",
-        summary_chars=len(final_state.get("summary", "")),
-        changed_files=final_state.get("changed_files", []),
         review_posted=posted,
+        error=error or None,
     )
 
-
-# import here so the invoke call above can reference it
-from app.state import PRReviewState
 
 if __name__ == "__main__":
     main()

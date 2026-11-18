@@ -5,16 +5,18 @@ Step 6:  PR Fetcher -> Summarizer
 Step 7:  + Supervisor
 Step 8:  + Security, Logic, Design agents (sequential)
 Step 9:  + Writer
-Step 10: + Publisher (posts review to GitHub)
+Step 10: + Publisher
+Step 11: + Human-in-the-loop approval gate between Writer and Publisher
 
 Complete pipeline:
     pr_fetcher -> summarizer -> supervisor
         -> security_agent -> logic_agent -> design_agent
-        -> writer -> publisher -> END
+        -> writer -> human_approval -> publisher -> END
 """
 
 import functools
 
+from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 
 from app.llm import get_llm
@@ -25,6 +27,7 @@ from app.nodes.agents import (
     logic_agent_node,
     security_agent_node,
 )
+from app.nodes.human_approval import human_approval_node
 from app.nodes.pr_fetcher import pr_fetcher_node
 from app.nodes.publisher import publisher_node
 from app.nodes.summarizer import summarizer_node
@@ -99,6 +102,7 @@ def build_graph(github_client: GitHubClient):
     builder.add_node("logic_agent", logic)
     builder.add_node("design_agent", design)
     builder.add_node("writer", writer)
+    builder.add_node("human_approval", human_approval_node)
     builder.add_node("publisher", publisher)
 
     # --- Wire edges ---
@@ -142,19 +146,34 @@ def build_graph(github_client: GitHubClient):
         },
     )
 
-    # design always goes to writer
     builder.add_edge("design_agent", "writer")
 
-    # writer always goes to publisher
+    # writer -> human_approval (always -- approval node decides
+    # whether to pause or pass through based on config)
     builder.add_conditional_edges(
         "writer",
+        _should_continue,
+        {"continue": "human_approval", END: END},
+    )
+
+    # human_approval -> publisher or END (if rejected)
+    builder.add_conditional_edges(
+        "human_approval",
         _should_continue,
         {"continue": "publisher", END: END},
     )
 
-    # publisher always goes to END
     builder.add_edge("publisher", END)
 
-    graph = builder.compile()
+    # --- Compile with checkpointer ---
+    # The checkpointer is what makes interrupt() work. It saves
+    # the full graph state after every node. When interrupt()
+    # fires in human_approval_node, LangGraph saves the state
+    # here and surfaces the interrupt to the caller. When you
+    # resume, LangGraph restores from this checkpoint and
+    # continues from exactly where it stopped.
+    checkpointer = MemorySaver()
+    graph = builder.compile(checkpointer=checkpointer)
+
     log.info("graph_compiled", nodes=list(builder.nodes))
     return graph
