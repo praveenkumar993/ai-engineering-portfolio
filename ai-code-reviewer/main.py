@@ -1,15 +1,25 @@
 """
 Entry point.
 
-Step 11: Human-in-the-loop approval gate added between Writer
-         and Publisher. The graph now runs in two phases:
+Step 1:  Config + logging spine
+Step 2:  PRReviewState verified
+Step 3:  GitHub client verified
+Step 4:  PR Fetcher node
+Step 5:  Summarizer node
+Step 6:  First working LangGraph graph
+Step 7:  Supervisor node
+Step 8:  Specialist agents (Security, Logic, Design)
+Step 9:  Writer node
+Step 10: Publisher node
+Step 11: Human-in-the-loop approval gate
 
-Phase 1: pr_fetcher -> summarizer -> supervisor -> agents -> writer
-         -> human_approval [PAUSE]
-         The review is shown to the operator. Graph is frozen.
+The graph runs in two phases when require_human_approval=True:
 
-Phase 2: operator types 'approve' or 'reject'
-         Graph resumes from the checkpoint.
+Phase 1: pr_fetcher -> summarizer -> supervisor -> agents
+         -> writer -> human_approval [PAUSE]
+         Operator reads the draft review and decides.
+
+Phase 2: graph resumes from checkpoint with operator decision.
          'approve' -> publisher -> review posted to GitHub
          'reject'  -> graph ends, review discarded
 """
@@ -22,9 +32,6 @@ from app.state import PRReviewState
 configure_logging()
 log = get_logger(__name__)
 
-# A thread_id ties both phases of a run together.
-# LangGraph uses it to find the right checkpoint when resuming.
-# Using the PR number means each PR has its own checkpoint thread.
 THREAD_CONFIG = {"configurable": {"thread_id": "pr-1"}}
 
 
@@ -47,27 +54,22 @@ def main() -> None:
     github_client = get_github_client()
     graph = build_graph(github_client)
 
-    # --- Phase 1: run the graph until it pauses ---
     log.info("graph_run_started", pr_number=1)
 
-    initial_state = PRReviewState(
-        repo=settings.github_repo,
-        pr_number=1,
-    )
-
-    # stream() lets us see the interrupt event as it happens.
-    # invoke() would work too but would silently swallow the pause.
-    events = list(graph.stream(
-        initial_state,
+    # --- Phase 1: run until interrupt or completion ---
+    list(graph.stream(
+        PRReviewState(
+            repo=settings.github_repo,
+            pr_number=1,
+        ),
         config=THREAD_CONFIG,
         stream_mode="values",
     ))
 
-    # Check if the graph paused at the interrupt
     state_snapshot = graph.get_state(THREAD_CONFIG)
 
     if state_snapshot.next == ("human_approval",):
-        # Graph is paused inside human_approval_node waiting for input
+        # Graph paused at the approval gate
         review = state_snapshot.values.get("review_comment", "")
 
         print("\n" + "=" * 60)
@@ -81,21 +83,11 @@ def main() -> None:
         print()
 
         decision = input("Your decision: ").strip().lower()
-
-        # --- Phase 2: resume the graph with the operator's decision ---
         log.info("graph_resuming", decision=decision)
 
-        final_events = list(graph.stream(
-            # None means "resume from checkpoint, don't restart"
-            # The Command with resume passes our decision to interrupt()
-            {"type": "resume", "value": decision} if False else None,
-            config=THREAD_CONFIG,
-            stream_mode="values",
-        ))
-
-        # Pass the decision back through the resume mechanism
+        # --- Phase 2: resume with the operator's decision ---
         from langgraph.types import Command
-        final_events = list(graph.stream(
+        list(graph.stream(
             Command(resume=decision),
             config=THREAD_CONFIG,
             stream_mode="values",
@@ -104,11 +96,11 @@ def main() -> None:
         final_state = graph.get_state(THREAD_CONFIG).values
 
     else:
-        # Graph completed without pausing (require_human_approval=False)
+        # Graph completed without pausing
+        # (require_human_approval=False)
         final_state = state_snapshot.values
 
     # --- Show result ---
-    review = final_state.get("review_comment", "")
     posted = final_state.get("review_posted", False)
     error = final_state.get("error", "")
 
