@@ -1,0 +1,40 @@
+# docker-compose.yml for ai-code-reviewer
+#
+# Single service: the FastAPI agent.
+# No Qdrant needed -- LangGraph's MemorySaver is in-memory and
+# GitHub is an external service over HTTPS.
+#
+# Usage:
+#   docker compose up --build          # build and start
+#   docker compose up -d               # start in background
+#   docker compose logs -f             # follow logs
+#   docker compose down                # stop and remove
+
+services:
+  ai-code-reviewer:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    environment:
+      # Pass secrets from your local .env file into the container.
+      # Never bake secrets into the image -- they'd be visible in
+      # docker history and in any image registry you push to.
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+      - GITHUB_REPO=${GITHUB_REPO}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GROQ_MODEL=${GROQ_MODEL:-openai/gpt-oss-120b}
+      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
+      - LANGCHAIN_PROJECT=${LANGCHAIN_PROJECT:-ai-code-reviewer}
+      - REQUIRE_HUMAN_APPROVAL=${REQUIRE_HUMAN_APPROVAL:-true}
+      - MAX_AGENT_ITERATIONS=${MAX_AGENT_ITERATIONS:-10}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+    volumes:
+      # Mount logs directory so logs persist when the container
+      # stops. Without this, logs vanish with the container.
+      - ./logs:/app/logs
+    restart: unless-stopped
+    # The healthcheck in the Dockerfile runs every 30s.
+    # Docker Compose reads it and marks the service healthy/unhealthy.
